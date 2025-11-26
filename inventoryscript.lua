@@ -6,6 +6,38 @@ local UserInputService  = game:GetService("UserInputService")
 local GuiService        = game:GetService("GuiService")
 local TextService       = game:GetService("TextService")
 local TweenService      = game:GetService("TweenService")
+
+-- UIScale helpers (локально, без внешних модулей)
+local function getEffectiveUIScale(gui: Instance): number
+    local k = 1
+    local p = gui
+    while p and p ~= game do
+        for _, ch in ipairs(p:GetChildren()) do
+            if ch:IsA("UIScale") then
+                k *= (ch.Scale or 1)
+            end
+        end
+        p = p.Parent
+    end
+    if k == 0 then
+        k = 1
+    end
+    return k
+end
+
+local function AbsUnscaled(gui: GuiObject): Vector2
+    local k = getEffectiveUIScale(gui)
+    local s = gui.AbsoluteSize
+    return Vector2.new(s.X / k, s.Y / k)
+end
+
+local function ContentUnscaled(layout: UIGridLayout | UIListLayout): Vector2
+    local k = getEffectiveUIScale(layout)
+    local s = layout.AbsoluteContentSize
+    return Vector2.new(s.X / k, s.Y / k)
+end
+
+local InventoryApi = ReplicatedStorage:WaitForChild("InventoryApi")
 local Inv = {} -- namespace для тяжёлых функций, чтобы не плодить local function
 
 --== Player/data
@@ -28,35 +60,6 @@ local function findDesc(parent: Instance, name: string)
 		if d.Name == name then return d end
 	end
 end
-
--- === [PATCH] UIScale-aware helpers =================================
-local function getEffectiveUIScale(gui: Instance): number
-	-- Multiply all UIScale components up the parent chain.
-	local k = 1
-	local p = gui
-	while p and p ~= game do
-		for _,ch in ipairs(p:GetChildren()) do
-			if ch:IsA("UIScale") then
-				k *= (ch.Scale or 1)
-			end
-		end
-		p = p.Parent
-	end
-	return (k == 0) and 1 or k
-end
-
-local function AbsUnscaled(gui: GuiObject): Vector2
-	local k = getEffectiveUIScale(gui)
-	local s = gui.AbsoluteSize
-	return Vector2.new(s.X / k, s.Y / k)
-end
-
-local function ContentUnscaled(layout: UIGridLayout | UIListLayout): Vector2
-	local k = getEffectiveUIScale(layout)
-	local s = layout.AbsoluteContentSize
-	return Vector2.new(s.X / k, s.Y / k)
-end
--- ===================================================================
 
 -- === DELETE MODE UI ===
 local RemoveModeBtn = InventoryMainFrame.Parent:WaitForChild("RemoveModeBtn")
@@ -2529,50 +2532,49 @@ recomputeEquippedHeight()
 scheduleReflow()
 
 -- === Переключатель размера сетки (ChangeGridBtn) ===
--- === Переключатель размера сетки (ChangeGridBtn через Inv) ===
--- === Переключатель размера сетки (ChangeGridBtn через Inv) ===
-function Inv.updateGridIcon(btn)
-	local mode = root:GetAttribute("GridMode") or "big"
-	if mode == "big" then
-		-- Сейчас большая сетка → кнопка показывает "сделать меньше"
-		btn.Image = "rbxassetid://122085968144036" -- иконка мелкой сетки
-	else
-		-- Сейчас маленькая сетка → кнопка показывает "сделать больше"
-		btn.Image = "rbxassetid://106305965634447" -- иконка крупной сетки
-	end
-end
+local ModuleContext = {
+        Inv = Inv,
+        root = root,
+        player = player,
+        NotEquippedGrid = NotEquippedGrid,
+        EquippedNftsFrame = EquippedNftsFrame,
+        applyResponsiveNotEquipped = applyResponsiveNotEquipped,
+        scheduleReflow = scheduleReflow,
+        isSlot = isSlot,
+        isCard = isCard,
+        IndexByUuid = IndexByUuid,
+        VISIBLE_LIMIT = VISIBLE_LIMIT,
+        inventoryFolder = inventoryFolder,
+        Q_ADD = Q_ADD,
+        scheduleQueue = scheduleQueue,
+        setNftOnlySize = setNftOnlySize,
+        ensurePowerLabelStrong = ensurePowerLabelStrong,
+        getPowerForUuid = getPowerForUuid,
+        GetFirstFreeSlot = GetFirstFreeSlot,
+        updateEquippedCounterDebounced = updateEquippedCounterDebounced,
+        applyLastRowCentering = applyLastRowCentering,
+        EquipNftEvent = EquipNftEvent,
+        UnequipNftEvent = UnequipNftEvent,
+        ApplyEquippedLayoutRF = ApplyEquippedLayoutRF,
+        refreshWindowAfterEquipChange = refreshWindowAfterEquipChange,
+        SetEquipSaveSuppressed = SetEquipSaveSuppressed,
+        GetPlayerEquipmentLvl = GetPlayerEquipmentLvl,
+        powerOf = powerOf,
+        ensureSlotExistence = ensureSlotExistence,
+        AddNftCard = AddNftCard,
+        GetEquippedUuidsRF = GetEquippedUuidsRF,
+        EquipBestBtn = EquipBestBtn,
+        UnequipAllBtn = UnequipAllBtn,
+        isRemoveMode = function()
+                return removeMode
+        end,
+}
 
-function Inv.setupChangeGridBtn()
-	local btn = root:FindFirstChild("ChangeGridBtn")
-	if not (btn and btn:IsA("ImageButton")) then
-		return
-	end
-
-	-- стартовое значение атрибута
-	if root:GetAttribute("GridMode") == nil then
-		root:SetAttribute("GridMode", "big")
-	end
-
-	Inv.updateGridIcon(btn)
-
-	btn.MouseButton1Click:Connect(function()
-		local mode = root:GetAttribute("GridMode") or "big"
-		if mode == "big" then
-			mode = "small"
-		else
-			mode = "big"
-		end
-
-		root:SetAttribute("GridMode", mode)
-		Inv.updateGridIcon(btn)
-
-		applyResponsiveNotEquipped()
-		scheduleReflow()
-	end)
-end
-
--- один раз инициализируем кнопку после того, как всё выше настроено
-Inv.setupChangeGridBtn()
+require(InventoryApi:WaitForChild("GridToggle")).attach(ModuleContext)
+require(InventoryApi:WaitForChild("CardLookup")).attach(ModuleContext)
+require(InventoryApi:WaitForChild("EquipActions")).attach(ModuleContext)
+require(InventoryApi:WaitForChild("Restoration")).attach(ModuleContext)
+require(InventoryApi:WaitForChild("EquipButtons")).attach(ModuleContext)
 
 
 if EquippedGridLayout2 then
@@ -2612,240 +2614,6 @@ do
 		end
 	end)
 end
-
---========================================================
--- Equip Best / Unequip All (atomic) через Inv-namespace
---========================================================
-
-function Inv.getCardByUuid(uuid)
-	for _, ch in ipairs(NotEquippedGrid:GetChildren()) do
-		if isCard(ch) and ch.Name == uuid then
-			return ch
-		end
-	end
-	return nil
-end
-
-function Inv.ensureCardSpawned(uuid)
-	local found = Inv.getCardByUuid(uuid)
-	if found then return found end
-
-	local recPos = IndexByUuid[uuid]
-	if recPos and recPos <= VISIBLE_LIMIT then
-		local inst = inventoryFolder:FindFirstChild(uuid)
-		if inst then
-			table.insert(Q_ADD, inst)
-			scheduleQueue()
-		end
-	end
-	return Inv.getCardByUuid(uuid)
-end
-
-
-
-function Inv.EquipBestNftsAtomic()
-	if removeMode then return end
-	SetEquipSaveSuppressed:FireServer(true)
-
-	-- 0) CОБИРАЕМ ТЕКУЩИЙ СПИСОК ЭКИПА ДО ПЕРЕТАСОВКИ
-	local oldEquipped = {}
-	for _, slot in ipairs(EquippedNftsFrame:GetChildren()) do
-		if isSlot(slot) then
-			for _, ch in ipairs(slot:GetChildren()) do
-				if isCard(ch) then
-					table.insert(oldEquipped, ch.Name)
-				end
-			end
-		end
-	end
-
-	-- 1) СБРАСЫВАЕМ ВСЕ КАРТЫ ИЗ СЛОТОВ В ГРИД
-	for _, slot in ipairs(EquippedNftsFrame:GetChildren()) do
-		if isSlot(slot) then
-			for _, ch in ipairs(slot:GetChildren()) do
-				if isCard(ch) then
-					slot:SetAttribute("Occupied", false)
-					ch:SetAttribute("EquippedSlotName", nil)
-					ch.Parent = NotEquippedGrid
-					ch.AnchorPoint = Vector2.new(0, 0)
-					ch.Position = UDim2.new()
-					ch.Size     = UDim2.fromScale(1, 1)
-					setNftOnlySize(ch, 0.8)
-				end
-			end
-		end
-	end
-
-	-- 2) ВЫБИРАЕМ ТОП-НФТ ПО СИЛЕ
-	local function getMaxEquipped()
-		local directLimit = tonumber(player:GetAttribute("EquipmentLimit"))
-		if directLimit and directLimit > 0 then return directLimit end
-		local lvlAttr = tonumber(player:GetAttribute("EquipmentLvl"))
-		if lvlAttr and lvlAttr >= 0 then return 5 + lvlAttr end
-		local lvl = tonumber(GetPlayerEquipmentLvl:InvokeServer()) or 0
-		return 5 + lvl
-	end
-
-	local maxEquipped = getMaxEquipped()
-
-	local candidates = {}
-	for _, inst in ipairs(inventoryFolder:GetChildren()) do
-		table.insert(candidates, { uuid = inst.Name, power = powerOf(inst) })
-	end
-	table.sort(candidates, function(a, b)
-		if a.power ~= b.power then return a.power > b.power end
-		return tostring(a.uuid) < tostring(b.uuid)
-	end)
-
-	-- 3) РАССТАВЛЯЕМ КАРТЫ ПО СЛОТАМ ЛОКАЛЬНО
-	local newEquippedSet = {}
-
-	for i = 1, math.min(maxEquipped, #candidates) do
-		local u = candidates[i].uuid
-		local card = Inv.ensureCardSpawned(u)
-		if card then
-			local free = GetFirstFreeSlot()
-			if not free then break end
-			free:SetAttribute("Occupied", true)
-			card:SetAttribute("EquippedSlotName", free.Name)
-			card.Parent = free
-			card.AnchorPoint = Vector2.new(0.5, 0.5)
-			card.Position    = UDim2.fromScale(0.5, 0.5)
-			card.Size        = UDim2.fromScale(1, 1)
-			setNftOnlySize(card, 0.8)
-			ensurePowerLabelStrong(card, getPowerForUuid(card.Name))
-
-			-- карты, которые попали в слоты, должны быть видимыми сразу
-			card.Visible = true
-
-			newEquippedSet[u] = true
-		end
-	end
-
-	updateEquippedCounterDebounced(true)
-	applyLastRowCentering()
-
-	-- 4) СЕРВЕРНЫЙ СИНК ЧЕРЕЗ EquipNft/UnequipNft
-	local newSet = newEquippedSet
-	local oldSet = {}
-	for _, uuid in ipairs(oldEquipped) do
-		oldSet[uuid] = true
-	end
-
-	-- сначала снимаем всё, чего нет в новом списке
-	for _, uuid in ipairs(oldEquipped) do
-		if not newSet[uuid] then
-			UnequipNftEvent:FireServer(uuid)
-		end
-	end
-
-	-- потом экипируем всё новое
-	for uuid, _ in pairs(newSet) do
-		if not oldSet[uuid] then
-			EquipNftEvent:FireServer(uuid)
-		end
-	end
-
-	-- 5) СОХРАНЯЕМ ЖЕЛАЕМЫЙ ПОРЯДОК НА СЕРВЕР (ApplyEquippedLayoutRF)
-	local desired = (function()
-		local slots = {}
-		for _, ch in ipairs(EquippedNftsFrame:GetChildren()) do
-			if isSlot(ch) then table.insert(slots, ch) end
-		end
-		table.sort(slots, function(a, b)
-			return (a.LayoutOrder or 0) < (b.LayoutOrder or 0)
-		end)
-		local res = {}
-		for _, s in ipairs(slots) do
-			for _, kid in ipairs(s:GetChildren()) do
-				if isCard(kid) then
-					table.insert(res, kid.Name)
-				end
-			end
-		end
-		return res
-	end)()
-
-	local ok, res = pcall(function()
-		return ApplyEquippedLayoutRF:InvokeServer(desired)
-	end)
-	if not ok or not res or res.ok ~= true then
-		warn("[INV] ApplyEquippedLayout failed", ok, res and res.err)
-	end
-
-	SetEquipSaveSuppressed:FireServer(false)
-	refreshWindowAfterEquipChange()
-end
-
-function Inv.UnequipAllAtomic()
-	if removeMode then return end
-	SetEquipSaveSuppressed:FireServer(true)
-
-	-- 0) CОБИРАЕМ ТЕКУЩИЙ СПИСОК ЭКИПА ДО ОПЕРАЦИИ
-	local oldEquipped = {}
-	for _, slot in ipairs(EquippedNftsFrame:GetChildren()) do
-		if isSlot(slot) then
-			for _, ch in ipairs(slot:GetChildren()) do
-				if isCard(ch) then
-					table.insert(oldEquipped, ch.Name)
-				end
-			end
-		end
-	end
-
-	-- 1) ЛОКАЛЬНО ВЫКИДЫВАЕМ ВСЕ КАРТЫ ИЗ СЛОТОВ В ГРИД
-	for _, slot in ipairs(EquippedNftsFrame:GetChildren()) do
-		if isSlot(slot) then
-			for _, ch in ipairs(slot:GetChildren()) do
-				if isCard(ch) then
-					slot:SetAttribute("Occupied", false)
-					ch:SetAttribute("EquippedSlotName", nil)
-					ch.Parent = NotEquippedGrid
-					ch.AnchorPoint = Vector2.new(0,0)
-					ch.Position = UDim2.new()
-					ch.Size     = UDim2.fromScale(1,1)
-					setNftOnlySize(ch, 0.8)
-					ensurePowerLabelStrong(ch, getPowerForUuid(ch.Name))
-				end
-			end
-		end
-	end
-
-	updateEquippedCounterDebounced(true)
-	applyLastRowCentering()
-	_G.__updateCanvas()
-
-	-- 2) СЕРВЕРНЫЙ UNEQUIP ДЛЯ КАЖДОГО РАНЬШЕ ЭКИПИРОВАННОГО NFT
-	for _, uuid in ipairs(oldEquipped) do
-		UnequipNftEvent:FireServer(uuid)
-	end
-
-	-- 3) ЧИСТЫЙ ЛЕЙАУТ НА СЕРВЕРЕ
-	local ok, res = pcall(function()
-		return ApplyEquippedLayoutRF:InvokeServer({})
-	end)
-	if not ok or not res or res.ok ~= true then
-		warn("[INV] ApplyEquippedLayout(empty) failed", ok, res and res.err)
-	end
-
-	SetEquipSaveSuppressed:FireServer(false)
-	refreshWindowAfterEquipChange()
-end
-
-
--- привязка кнопок
-if EquipBestBtn then
-	EquipBestBtn.MouseButton1Click:Connect(function()
-		Inv.EquipBestNftsAtomic()
-	end)
-end
-
-if UnequipAllBtn then
-	UnequipAllBtn.MouseButton1Click:Connect(function()
-		Inv.UnequipAllAtomic()
-	end)
-end
-
 
 -- === Delete Mode toggle ===
 if RemoveModeBtn and RemoveModeBtn:IsA("GuiButton") then
@@ -2915,153 +2683,5 @@ if RemoveBtn and RemoveBtn:IsA("GuiButton") then
 		RemoveBtn.TextTransparency = 0.35
 		RemoveBtn.Active = false
 		RemoveBtn.AutoButtonColor = false
-	end)
+        end)
 end
-
--- =======================================================
--- [PERSIST] Restoration of layout
--- =======================================================
--- =======================================================
--- [PERSIST] Restoration of layout (через Inv.*, без local function)
--- =======================================================
-
--- вытаскиваем uuid из разных форматов, которые мог вернуть сервер
-function Inv.extractUuid(raw)
-	if type(raw) == "string" then
-		return raw
-	end
-	if type(raw) == "table" then
-		if type(raw.uuid) == "string" then
-			return raw.uuid
-		end
-		if type(raw.id) == "string" then
-			return raw.id
-		end
-		if type(raw[1]) == "string" then
-			return raw[1]
-		end
-	end
-	return nil
-end
-
--- поиск карточки уже в слоте
-function Inv.findEquippedCardByUuid(uuid: string): GuiObject?
-	for _, slot in ipairs(EquippedNftsFrame:GetChildren()) do
-		if isSlot(slot) then
-			local ch = slot:FindFirstChild(uuid)
-			if ch and isCard(ch) then
-				return ch
-			end
-		end
-	end
-	return nil
-end
-
--- гарантируем, что у uuid есть UI-карточка
-function Inv.ensureCardForUuid(uuid: string): GuiObject?
-	-- 1) есть среди неэкипированных
-	local card = NotEquippedGrid:FindFirstChild(uuid)
-	if card and isCard(card) then
-		return card
-	end
-
-	-- 2) вдруг уже в слоте
-	card = Inv.findEquippedCardByUuid(uuid)
-	if card and isCard(card) then
-		return card
-	end
-
-	-- 3) ждём инстанс в инвентаре и создаём UI-карту
-	local inst = inventoryFolder:FindFirstChild(uuid)
-	if not inst then
-		inst = inventoryFolder:WaitForChild(uuid, 5)
-	end
-	if not inst then
-		return nil
-	end
-
-	AddNftCard(inst) -- твоя функция выше
-	card = NotEquippedGrid:FindFirstChild(uuid) or Inv.findEquippedCardByUuid(uuid)
-	return (card and isCard(card)) and card or nil
-end
-
--- helper для получения списка экипировки с ретраями
-function Inv.fetchEquippedListWithRetry(maxAttempts: number, delaySec: number)
-	for attempt = 1, maxAttempts do
-		local ok, res = pcall(function()
-			return GetEquippedUuidsRF:InvokeServer()
-		end)
-
-		if not ok then
-			warn("[INV] GetEquippedUuidsRF failed:", res)
-			return nil
-		end
-
-		if type(res) == "table" and #res > 0 then
-			return res
-		end
-
-		task.wait(delaySec)
-	end
-	return nil
-end
-
--- основная логика восстановления
-function Inv.restoreEquippedLayoutFromServer()
-	-- 1) тянем список uuid с ретраями
-	local equippedList = Inv.fetchEquippedListWithRetry(10, 0.2)
-	if not equippedList or #equippedList == 0 then
-		-- реально нечего восстанавливать
-		return
-	end
-
-	-- 2) убедимся, что слотов достаточно
-	ensureSlotExistence()
-
-	-- 3) развешиваем каждый uuid по слотам
-	for _, raw in ipairs(equippedList) do
-		local uuid = Inv.extractUuid(raw)
-		if uuid and #uuid > 0 then
-			uuid = tostring(uuid)
-
-			local card = Inv.ensureCardForUuid(uuid)
-			if card then
-				local parentSlot = card.Parent
-				if parentSlot and parentSlot:IsDescendantOf(EquippedNftsFrame) then
-					-- уже сидит в слоте
-					parentSlot:SetAttribute("Occupied", true)
-					card.Visible = true
-				else
-					local free = GetFirstFreeSlot()
-					if free then
-						free:SetAttribute("Occupied", true)
-						card:SetAttribute("EquippedSlotName", free.Name)
-						card.Parent = free
-						card.AnchorPoint = Vector2.new(0.5, 0.5)
-						card.Position    = UDim2.fromScale(0.5, 0.5)
-						card.Size        = UDim2.fromScale(1, 1)
-						setNftOnlySize(card, 0.8)
-						ensurePowerLabelStrong(card, getPowerForUuid(card.Name))
-
-						-- при восстановлении слотов тоже показываем карту сразу
-						card.Visible = true
-					else
-						warn("[INV] no free slot for equipped uuid", uuid)
-					end
-				end
-			else
-				warn("[INV] cannot restore equipped uuid, not found:", uuid)
-			end
-		end
-	end
-
-	-- 4) финальная подправка внешнего вида
-	applyLastRowCentering()
-	updateEquippedCounterDebounced(true)
-	_G.__updateCanvas()
-end
-
--- отдельный defer, сам по себе очень маленький
-task.defer(function()
-	Inv.restoreEquippedLayoutFromServer()
-end)
